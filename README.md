@@ -75,6 +75,12 @@ Tag: Chill (佛系型) -> 适合阅读/挂机。
 提取画布底层的物理颗粒（Canvas Grain），映射为光电鼠标在粗糙表面滑动时产生的高频底噪。
 
 🚀 快速开始 (Quick Start)
+0. 安装依赖
+Bash
+
+# 使用 uv 安装项目依赖
+uv sync
+
 1. 准备原材料
 找一张公版名画（推荐《星月夜》或《自叙帖》），分辨率越高越好。
 
@@ -82,17 +88,17 @@ Tag: Chill (佛系型) -> 适合阅读/挂机。
 Bash
 
 # 提取轨迹，指定输出设备为 Pixel 4
-cr extract --source "starry_night.jpg" --device "pixel_4" --style "aggressive"
+uv run cr extract --source "starry_night.jpg" --device "pixel_4" --style "aggressive" --out "./artifacts/extraction"
 3. 运行仿真增强
 Bash
 
 # 补全 IMU 数据
-cr simulate --input "./rcp_temp/" --physics-engine "internal"
+uv run cr simulate --input-dir "./artifacts/extraction" --physics-engine "internal" --out "./artifacts/simulation"
 4. 导出
 Bash
 
 # 生成最终 RCP 包
-cr export --format rcp_2025 --out "./dataset/"
+uv run cr export --extraction-dir "./artifacts/extraction" --simulation-dir "./artifacts/simulation" --format rcp_2025 --out "./dataset/"
 ⚠️ 免责声明 (Disclaimer)
 本工具是一个“引擎”，不包含任何“燃料”。 用户需自行寻找合法的图像源进行生成。
 
