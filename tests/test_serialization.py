@@ -9,7 +9,7 @@ import importlib.util
 sys.path.append(str(Path(__file__).resolve().parents[1] / "src"))
 
 import pytest
-from click.testing import CliRunner
+from typer.testing import CliRunner
 
 from cloud_readers.protos import rcp_2025_pb2
 from cloud_readers.cli import app
@@ -119,13 +119,26 @@ def test_cli_export_produces_rcp_package(tmp_path: Path) -> None:
         "points": [[0, 0], [1, 2], [2, 3], [3, 3]],
         "velocity": [0.1, 0.2, 0.3, 0.2],
         "curvature": [0.2, 0.25, 0.3, 0.35],
+        "pressure": [0.9, 0.8, 0.7, 0.6],
+        "size": [0.4, 0.5, 0.6, 0.7],
+        "timestamps_us": [0, 50_000, 100_000, 150_000],
     }
     (extraction_dir / "kinematics.json").write_text(json.dumps(kinematics_payload))
 
     simulation_payload = {
         "metadata": {"physics_engine": "internal"},
-        "accelerometer": [0.0, 0.05, 0.1, 0.15],
-        "gyroscope": [0.0, 0.01, 0.02, 0.03],
+        "accelerometer": {
+            "t": [0, 5_000, 10_000, 15_000],
+            "x": [0.0, 0.05, 0.1, 0.15],
+            "y": [0.0, 0.0, 0.0, 0.0],
+            "z": [-9.81, -9.80, -9.82, -9.80],
+        },
+        "gyroscope": {
+            "t": [0, 5_000, 10_000, 15_000],
+            "x": [0.0, 0.0, 0.0, 0.0],
+            "y": [0.0, 0.0, 0.0, 0.0],
+            "z": [0.0, 0.01, 0.02, 0.03],
+        },
     }
     (simulation_dir / "simulation.json").write_text(json.dumps(simulation_payload))
 
@@ -153,11 +166,11 @@ def test_cli_export_produces_rcp_package(tmp_path: Path) -> None:
     acc = rcp.read_channel_pbz(paths.channels.acc_path, rcp_2025_pb2.AccChannel)
     gyro = rcp.read_channel_pbz(paths.channels.gyro_path, rcp_2025_pb2.GyroChannel)
 
-    assert touch.t == [0, 50_000, 100_000, 150_000]
-    assert len(acc.t) == len(simulation_payload["accelerometer"])
-    assert len(gyro.t) == len(simulation_payload["gyroscope"])
+    assert touch.t == kinematics_payload["timestamps_us"]
+    assert list(acc.t) == simulation_payload["accelerometer"]["t"]
+    assert list(gyro.t) == simulation_payload["gyroscope"]["t"]
     assert acc.x[1] == pytest.approx(0.05)
-    assert gyro.z[-1] == pytest.approx(1.0)
+    assert gyro.z[-1] == pytest.approx(0.03)
 
     manifest_json = json.loads(paths.manifest_path.read_text())
     assert manifest_json["version"] == "rcp_2025"
