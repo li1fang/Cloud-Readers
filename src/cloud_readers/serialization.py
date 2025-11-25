@@ -104,20 +104,12 @@ def bundle_to_manifest(bundle: ExportBundle, version: str, package_id: str | Non
 
 
 def bundle_to_touch_channel(bundle: ExportBundle, spacing_us: int = 50_000) -> rcp_2025_pb2.TouchChannel:
-    points = bundle.kinematics.profile.points
-    timestamps = _normalize_timestamps(len(points), spacing_us)
-    xs: list[float] = []
-    ys: list[float] = []
-    for point in points:
-        if len(point) >= 2:
-            xs.append(float(point[0]))
-            ys.append(float(point[1]))
-        else:
-            xs.append(0.0)
-            ys.append(0.0)
-
-    pressure = _normalize_to_unit_range(bundle.kinematics.profile.velocities, len(points))
-    size = _normalize_to_unit_range(bundle.kinematics.profile.curvature, len(points))
+    profile = bundle.kinematics.profile
+    timestamps = [int(v) for v in profile.timestamps_us]
+    xs = [float(p[0]) for p in profile.points]
+    ys = [float(p[1]) for p in profile.points]
+    pressure = _encode_array(profile.pressure)
+    size = _encode_array(profile.size)
 
     return rcp_2025_pb2.TouchChannel(t=timestamps, x=xs, y=ys, pressure=pressure, size=size)
 
@@ -135,17 +127,23 @@ def _split_axes(data: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
 
 
 def bundle_to_acc_channel(bundle: ExportBundle, spacing_us: int = 50_000) -> rcp_2025_pb2.AccChannel:
-    accel = np.atleast_1d(bundle.simulation.accelerometer)
-    x, y, z = _split_axes(accel)
-    timestamps = _normalize_timestamps(len(x), spacing_us)
-    return rcp_2025_pb2.AccChannel(t=timestamps, x=_encode_array(x), y=_encode_array(y), z=_encode_array(z))
+    accel = bundle.simulation.accelerometer
+    return rcp_2025_pb2.AccChannel(
+        t=[int(v) for v in accel.t],
+        x=_encode_array(accel.x),
+        y=_encode_array(accel.y),
+        z=_encode_array(accel.z),
+    )
 
 
 def bundle_to_gyro_channel(bundle: ExportBundle, spacing_us: int = 50_000) -> rcp_2025_pb2.GyroChannel:
-    gyro = np.atleast_1d(bundle.simulation.gyroscope)
-    x, y, z = _split_axes(gyro)
-    timestamps = _normalize_timestamps(len(x), spacing_us)
-    return rcp_2025_pb2.GyroChannel(t=timestamps, x=_encode_array(x), y=_encode_array(y), z=_encode_array(z))
+    gyro = bundle.simulation.gyroscope
+    return rcp_2025_pb2.GyroChannel(
+        t=[int(v) for v in gyro.t],
+        x=_encode_array(gyro.x),
+        y=_encode_array(gyro.y),
+        z=_encode_array(gyro.z),
+    )
 
 
 def export_bundle(bundle: ExportBundle, output_dir: Path, fmt: str, logger: logging.Logger) -> Path:
@@ -177,6 +175,9 @@ def export_kinematics(kinematics: KinematicsResult, output_dir: Path, logger: lo
         "points": kinematics.profile.points,
         "velocity": _encode_array(kinematics.profile.velocities),
         "curvature": _encode_array(kinematics.profile.curvature),
+        "pressure": _encode_array(kinematics.profile.pressure),
+        "size": _encode_array(kinematics.profile.size),
+        "timestamps_us": [int(v) for v in kinematics.profile.timestamps_us],
     }
     return persist_stage(data, output_dir, "kinematics", logger)
 
@@ -235,6 +236,9 @@ def load_kinematics(path: Path, logger: logging.Logger) -> KinematicsResult:
         points=data.get("points", []),
         velocities=np.array(data.get("velocity", []), dtype=float),
         curvature=np.array(data.get("curvature", []), dtype=float),
+        pressure=np.array(data.get("pressure", []), dtype=float),
+        size=np.array(data.get("size", []), dtype=float),
+        timestamps_us=np.array(data.get("timestamps_us", []), dtype=np.int64),
     )
     metadata: Dict[str, Any] = data.get("metadata", {})
     logger.debug("Loaded kinematics from %s", path)

@@ -1,20 +1,18 @@
 """Typer CLI entry point for Cloud Readers."""
 
-from __future__ import annotations
-
 import json
 import logging
 from pathlib import Path
 
-import click
 import numpy as np
 from rich.console import Console
 from rich.table import Table
+import typer
 
 from . import extraction, ingestion, kinematics, serialization, simulation
 
 console = Console()
-app = click.Group(help="Cloud Readers: resurrect biomechanics from static art")
+app = typer.Typer(name="cr", help="Cloud Readers: resurrect biomechanics from static art")
 
 
 def configure_logger(verbose: bool) -> logging.Logger:
@@ -28,19 +26,48 @@ def configure_logger(verbose: bool) -> logging.Logger:
 
 @app.command()
 def extract(
-    source: Path = typer.Option(..., exists=True, readable=True, path_type=Path, help="Source artwork to ingest."),
-    device: str = typer.Option("generic", help="Device profile label."),
-    style: str = typer.Option("neutral", help="Artistic intent for metadata tagging."),
-    dpi: float | None = typer.Option(None, help="Dots per inch for the source capture."),
+    source: Path = typer.Option(
+        ...,
+        exists=True,
+        readable=True,
+        path_type=Path,
+        is_flag=False,
+        help="Source artwork to ingest.",
+    ),
+    device: str = typer.Option("generic", is_flag=False, help="Device profile label."),
+    style: str = typer.Option("neutral", is_flag=False, help="Artistic intent for metadata tagging."),
+    dpi: float | None = typer.Option(None, is_flag=False, help="Dots per inch for the source capture."),
     device_profile_path: Path | None = typer.Option(
-        None, path_type=Path, exists=True, dir_okay=False, readable=True, help="Path to device profile metadata."
+        None,
+        path_type=Path,
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        is_flag=False,
+        help="Path to device profile metadata.",
     ),
     json_config: Path | None = typer.Option(
-        None, path_type=Path, exists=True, dir_okay=False, readable=True, help="JSON file with shape/noise parameters."
+        None,
+        path_type=Path,
+        exists=True,
+        dir_okay=False,
+        readable=True,
+        is_flag=False,
+        help="JSON file with shape/noise parameters.",
     ),
-    gemini: bool = typer.Option(True, help="Enable Gemini labeling with GEMINI_API_KEY."),
-    gemini_model: str = typer.Option("gemini-1.5-flash", help="Gemini model used for labeling."),
-    out: Path = typer.Option(Path("./artifacts/extraction"), path_type=Path, help="Directory to store intermediate outputs."),
+    gemini: bool = typer.Option(
+        False,
+        "--gemini",
+        is_flag=True,
+        help="Enable Gemini labeling with GEMINI_API_KEY.",
+    ),
+    gemini_model: str = typer.Option("gemini-1.5-flash", is_flag=False, help="Gemini model used for labeling."),
+    out: Path = typer.Option(
+        Path("./artifacts/extraction"),
+        path_type=Path,
+        is_flag=False,
+        help="Directory to store intermediate outputs (extraction.json, kinematics.json).",
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logging."),
 ):
     """Run ingestion, extraction, and kinematics reconstruction."""
@@ -73,22 +100,42 @@ def extract(
 
 
 @app.command()
-@click.option(
-    "--input-dir",
-    required=True,
-    type=click.Path(exists=True, file_okay=False, path_type=Path),
-    help="Directory containing kinematics.json.",
-)
-@click.option("--physics-engine", default="internal", show_default=True, help="Physics backend name.")
-@click.option(
-    "--out",
-    default=Path("./artifacts/simulation"),
-    show_default=True,
-    type=click.Path(path_type=Path),
-    help="Directory to store simulated data.",
-)
-@click.option("--verbose", "-v", is_flag=True, default=False, help="Enable debug logging.")
-def simulate(input_dir: Path, physics_engine: str, out: Path, verbose: bool) -> None:
+def simulate(
+    input_dir: Path = typer.Option(
+        ...,
+        exists=True,
+        file_okay=False,
+        path_type=Path,
+        is_flag=False,
+        help="Directory containing kinematics.json.",
+    ),
+    physics_engine: str = typer.Option("internal", is_flag=False, help="Physics backend name."),
+    sample_rate_hz: float = typer.Option(
+        200.0,
+        min=1.0,
+        is_flag=False,
+        help="Output IMU sample rate (Hz). Also defines delta_t for kinematics resampling.",
+    ),
+    noise_std: float = typer.Option(
+        0.05,
+        min=0.0,
+        is_flag=False,
+        help="Gaussian noise stddev for IMU synthesis (m/s^2 or rad/s).",
+    ),
+    gravity: str = typer.Option(
+        "0,0,-9.81",
+        is_flag=False,
+        help="Gravity vector in m/s^2 as 'x,y,z'. Defaults to standard earth gravity pointing negative z.",
+    ),
+    noise_seed: int | None = typer.Option(None, is_flag=False, help="Optional RNG seed for deterministic noise."),
+    out: Path = typer.Option(
+        Path("./artifacts/simulation"),
+        path_type=Path,
+        is_flag=False,
+        help="Directory to store simulated data.",
+    ),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logging."),
+):
     """Generate IMU-like channels from extracted kinematics."""
 
     def _parse_gravity(raw: str) -> tuple[float, float, float]:
@@ -109,7 +156,8 @@ def simulate(input_dir: Path, physics_engine: str, out: Path, verbose: bool) -> 
     sim_config = simulation.SimulationConfig(
         sample_rate_hz=sample_rate_hz,
         noise_std=noise_std,
-        gravity_direction=_parse_gravity(gravity),
+        gravity_vector=_parse_gravity(gravity),
+        noise_seed=noise_seed,
     )
     simulated = simulation.simulate_motion(
         kine,
@@ -123,28 +171,32 @@ def simulate(input_dir: Path, physics_engine: str, out: Path, verbose: bool) -> 
 
 
 @app.command()
-@click.option(
-    "--extraction-dir",
-    required=True,
-    type=click.Path(exists=True, file_okay=False, path_type=Path),
-    help="Folder with extraction artifacts.",
-)
-@click.option(
-    "--simulation-dir",
-    required=True,
-    type=click.Path(exists=True, file_okay=False, path_type=Path),
-    help="Folder with simulation artifacts.",
-)
-@click.option("--fmt", default="rcp_2025", show_default=True, help="Export format label.")
-@click.option(
-    "--out",
-    default=Path("./artifacts/export"),
-    show_default=True,
-    type=click.Path(path_type=Path),
-    help="Destination folder.",
-)
-@click.option("--verbose", "-v", is_flag=True, default=False, help="Enable debug logging.")
-def export(extraction_dir: Path, simulation_dir: Path, fmt: str, out: Path, verbose: bool) -> None:
+def export(
+    extraction_dir: Path = typer.Option(
+        ...,
+        exists=True,
+        file_okay=False,
+        path_type=Path,
+        is_flag=False,
+        help="Folder with extraction artifacts.",
+    ),
+    simulation_dir: Path = typer.Option(
+        ...,
+        exists=True,
+        file_okay=False,
+        path_type=Path,
+        is_flag=False,
+        help="Folder with simulation artifacts.",
+    ),
+    fmt: str = typer.Option("rcp_2025", is_flag=False, help="Export format label."),
+    out: Path = typer.Option(
+        Path("./artifacts/export"),
+        path_type=Path,
+        is_flag=False,
+        help="Destination folder.",
+    ),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logging."),
+) -> None:
     """Compress and package the pipeline outputs."""
 
     logger = configure_logger(verbose)

@@ -1,0 +1,104 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  name: cloud-readers-e2e
+spec:
+  entrypoint: pipeline
+  volumeClaimTemplates:
+    - metadata:
+        name: workdir
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 2Gi
+  templates:
+    - name: pipeline
+      dag:
+        tasks:
+          - name: build
+            template: build-image
+          - name: extract
+            dependencies: [build]
+            template: extract
+          - name: simulate
+            dependencies: [extract]
+            template: simulate
+          - name: export
+            dependencies: [simulate]
+            template: export
+          - name: verify
+            dependencies: [export]
+            template: verify
+    - name: build-image
+      container:
+        image: docker:24.0
+        command: ["sh", "-c"]
+        args:
+          - |
+            docker build -t cloud-readers:latest .
+      outputs: {}
+    - name: extract
+      container:
+        image: cloud-readers:latest
+        workingDir: /workspace
+        command: ["uv", "run", "cr", "extract"]
+        args:
+          - --source
+          - /data/input/golden_sample.jpg
+          - --device
+          - pixel_4
+          - --style
+          - aggressive
+          - --out
+          - /data/extraction
+        volumeMounts:
+          - name: workdir
+            mountPath: /data
+    - name: simulate
+      container:
+        image: cloud-readers:latest
+        workingDir: /workspace
+        command: ["uv", "run", "cr", "simulate"]
+        args:
+          - --input-dir
+          - /data/extraction
+          - --sample-rate-hz
+          - "200"
+          - --noise-std
+          - "0.05"
+          - --gravity
+          - "0,0,-9.81"
+          - --out
+          - /data/simulation
+        volumeMounts:
+          - name: workdir
+            mountPath: /data
+    - name: export
+      container:
+        image: cloud-readers:latest
+        workingDir: /workspace
+        command: ["uv", "run", "cr", "export"]
+        args:
+          - --extraction-dir
+          - /data/extraction
+          - --simulation-dir
+          - /data/simulation
+          - --fmt
+          - rcp_2025
+          - --out
+          - /data/export
+        volumeMounts:
+          - name: workdir
+            mountPath: /data
+    - name: verify
+      container:
+        image: cloud-readers:latest
+        workingDir: /workspace
+        command: ["uv", "run", "python", "tests/verify_rcp_integrity.py"]
+        args:
+          - --package
+          - /data/export
+        volumeMounts:
+          - name: workdir
+            mountPath: /data
