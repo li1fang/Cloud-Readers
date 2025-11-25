@@ -1,0 +1,29 @@
+[build-system]
+requires = ["uv>=0.4.20"]
+build-backend = "uv.build"
+
+[project]
+name = "cloud-readers"
+version = "0.1.0"
+description = "Cloud Readers CLI and pipeline for reconstructing biomechanics from static art."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Natural Control Architect" }]
+requires-python = ">=3.12"
+dependencies = [
+    "typer>=0.12.3",
+    "rich>=13.7.1",
+    "google-generativeai>=0.8.0",
+    "opencv-python-headless>=4.9.0.0",
+    "scikit-image>=0.22.0",
+    "numpy>=1.26.0",
+    "scipy>=1.11.0",
+    "protobuf>=5.26.0",
+    "zstandard>=0.22.0",
+]
+
+[project.scripts]
+cr = "cloud_readers.cli:app"
+
+[tool.uv]
+dev-dependencies = ["ruff>=0.4.0"]
