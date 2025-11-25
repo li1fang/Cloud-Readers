@@ -13,7 +13,7 @@ import zstandard as zstd
 
 from .extraction import ExtractionResult
 from .kinematics import KinematicProfile, KinematicsResult
-from .simulation import SimulationResult
+from .simulation import ChannelColumns, SimulationResult
 
 
 @dataclass
@@ -27,6 +27,15 @@ class ExportBundle:
 
 def _encode_array(array: np.ndarray) -> list[float]:
     return [float(v) for v in array.ravel()]
+
+
+def _encode_channel(channel: ChannelColumns) -> Dict[str, list[float]]:
+    return {
+        "t": [int(v) for v in channel.t.ravel()],
+        "x": _encode_array(channel.x),
+        "y": _encode_array(channel.y),
+        "z": _encode_array(channel.z),
+    }
 
 
 def persist_stage(data: Dict[str, Any], output_dir: Path, name: str, logger: logging.Logger) -> Path:
@@ -52,8 +61,8 @@ def export_bundle(bundle: ExportBundle, output_dir: Path, fmt: str, logger: logg
         },
         "counts": {
             "points": len(bundle.kinematics.profile.points),
-            "accelerometer": len(bundle.simulation.accelerometer),
-            "gyroscope": len(bundle.simulation.gyroscope),
+            "accelerometer": len(bundle.simulation.accelerometer.t),
+            "gyroscope": len(bundle.simulation.gyroscope.t),
         },
     }
     manifest_path = persist_stage(manifest, output_dir, "manifest", logger)
@@ -62,8 +71,8 @@ def export_bundle(bundle: ExportBundle, output_dir: Path, fmt: str, logger: logg
         "points": bundle.kinematics.profile.points,
         "velocity": _encode_array(bundle.kinematics.profile.velocities),
         "curvature": _encode_array(bundle.kinematics.profile.curvature),
-        "accelerometer": _encode_array(bundle.simulation.accelerometer),
-        "gyroscope": _encode_array(bundle.simulation.gyroscope),
+        "accelerometer": _encode_channel(bundle.simulation.accelerometer),
+        "gyroscope": _encode_channel(bundle.simulation.gyroscope),
     }
     blob = json.dumps(channel_payload).encode("utf-8")
     compressed_path = output_dir / "channels.pbz"
@@ -96,8 +105,8 @@ def export_kinematics(kinematics: KinematicsResult, output_dir: Path, logger: lo
 def export_simulation(simulation: SimulationResult, output_dir: Path, logger: logging.Logger) -> Path:
     data = {
         "metadata": simulation.metadata,
-        "accelerometer": _encode_array(simulation.accelerometer),
-        "gyroscope": _encode_array(simulation.gyroscope),
+        "accelerometer": _encode_channel(simulation.accelerometer),
+        "gyroscope": _encode_channel(simulation.gyroscope),
     }
     return persist_stage(data, output_dir, "simulation", logger)
 
@@ -108,8 +117,30 @@ def load_simulation(path: Path, logger: logging.Logger) -> SimulationResult:
     with path.open(encoding="utf-8") as handle:
         data = json.load(handle)
 
-    accelerometer = np.array(data.get("accelerometer", []), dtype=float)
-    gyroscope = np.array(data.get("gyroscope", []), dtype=float)
+    def _load_channel(payload: Dict[str, Any]) -> ChannelColumns:
+        t = np.array(payload.get("t", []), dtype=np.int64)
+        x = np.array(payload.get("x", []), dtype=float)
+        y = np.array(payload.get("y", []), dtype=float)
+        z = np.array(payload.get("z", []), dtype=float)
+
+        if len(t) and (len(t) != len(x) or len(t) != len(y) or len(t) != len(z)):
+            raise ValueError("Simulation channels must align t/x/y/z lengths")
+
+        if len(t) > 1 and np.any(np.diff(t) <= 0):
+            order = np.argsort(t, kind="stable")
+            t, x, y, z = (arr[order] for arr in (t, x, y, z))
+
+        if len(t) > 1:
+            fixed_t = t.copy()
+            for idx in range(1, len(fixed_t)):
+                if fixed_t[idx] <= fixed_t[idx - 1]:
+                    fixed_t[idx] = fixed_t[idx - 1] + 1
+            t = fixed_t
+
+        return ChannelColumns(t=t, x=x, y=y, z=z)
+
+    accelerometer = _load_channel(data.get("accelerometer", {}))
+    gyroscope = _load_channel(data.get("gyroscope", {}))
     metadata: Dict[str, Any] = data.get("metadata", {})
     logger.debug("Loaded simulation from %s", path)
     return SimulationResult(accelerometer=accelerometer, gyroscope=gyroscope, metadata=metadata)
