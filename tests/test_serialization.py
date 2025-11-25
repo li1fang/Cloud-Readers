@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
-import pytest
 from pathlib import Path
 
+import pytest
+from click.testing import CliRunner
+
 from cloud_readers.protos import rcp_2025_pb2
+from cloud_readers.cli import app
 from cloud_readers.serialization import rcp
 
 
@@ -77,6 +80,81 @@ def test_write_and_read_round_trip(tmp_path: Path) -> None:
 
     checksum_lines = (package_root / "checksums.txt").read_text().strip().splitlines()
     assert all("  " in line for line in checksum_lines)
+
+
+def test_cli_export_produces_rcp_package(tmp_path: Path) -> None:
+    runner = CliRunner()
+    extraction_dir = tmp_path / "extraction"
+    simulation_dir = tmp_path / "simulation"
+    package_root = tmp_path / "cli_package"
+    extraction_dir.mkdir()
+    simulation_dir.mkdir()
+
+    extraction_payload = {
+        "metadata": {
+            "device": "pixel_4",
+            "style": "calm",
+            "source": "unit-test",
+            "dpi": 320.0,
+            "created_at": "2025-01-01T00:00:00Z",
+        },
+        "skeleton_points": [[0, 0], [1, 1], [2, 2]],
+    }
+    (extraction_dir / "extraction.json").write_text(json.dumps(extraction_payload))
+
+    kinematics_payload = {
+        "metadata": {"mean_velocity": 0.4},
+        "points": [[0, 0], [1, 2], [2, 3], [3, 3]],
+        "velocity": [0.1, 0.2, 0.3, 0.2],
+        "curvature": [0.2, 0.25, 0.3, 0.35],
+    }
+    (extraction_dir / "kinematics.json").write_text(json.dumps(kinematics_payload))
+
+    simulation_payload = {
+        "metadata": {"physics_engine": "internal"},
+        "accelerometer": [0.0, 0.05, 0.1, 0.15],
+        "gyroscope": [0.0, 0.01, 0.02, 0.03],
+    }
+    (simulation_dir / "simulation.json").write_text(json.dumps(simulation_payload))
+
+    result = runner.invoke(
+        app,
+        [
+            "export",
+            "--extraction-dir",
+            str(extraction_dir),
+            "--simulation-dir",
+            str(simulation_dir),
+            "--out",
+            str(package_root),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+
+    paths = rcp.package_paths(package_root)
+    assert paths.manifest_path.exists()
+    assert paths.index_path.exists()
+    assert paths.checksums_path.exists()
+    assert paths.channels.touch_path.exists()
+
+    touch = rcp.read_channel_pbz(paths.channels.touch_path, rcp_2025_pb2.TouchChannel)
+    acc = rcp.read_channel_pbz(paths.channels.acc_path, rcp_2025_pb2.AccChannel)
+    gyro = rcp.read_channel_pbz(paths.channels.gyro_path, rcp_2025_pb2.GyroChannel)
+
+    assert touch.t == [0, 50_000, 100_000, 150_000]
+    assert len(acc.t) == len(simulation_payload["accelerometer"])
+    assert len(gyro.t) == len(simulation_payload["gyroscope"])
+    assert acc.x[1] == pytest.approx(0.05)
+    assert gyro.z[-1] == pytest.approx(1.0)
+
+    manifest_json = json.loads(paths.manifest_path.read_text())
+    assert manifest_json["version"] == "rcp_2025"
+    assert manifest_json["attributes"]["style"] == "calm"
+
+    index_json = json.loads(paths.index_path.read_text())
+    assert index_json["touch_samples"] == len(kinematics_payload["points"])
+    assert len(index_json["checksums"]) == 4
+    assert "index.json" in paths.checksums_path.read_text()
 
 
 def test_length_mismatch_raises(tmp_path: Path) -> None:
