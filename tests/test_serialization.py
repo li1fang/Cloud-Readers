@@ -3,9 +3,21 @@ from __future__ import annotations
 import json
 import pytest
 from pathlib import Path
+import logging
+import sys
+import importlib.util
+
+sys.path.append(str(Path(__file__).resolve().parents[1] / "src"))
 
 from cloud_readers.protos import rcp_2025_pb2
 from cloud_readers.serialization import rcp
+
+_serialization_path = Path(__file__).resolve().parents[1] / "src" / "cloud_readers" / "serialization.py"
+_serialization_spec = importlib.util.spec_from_file_location("cloud_readers.serialization_runtime", _serialization_path)
+serialization = importlib.util.module_from_spec(_serialization_spec)
+assert _serialization_spec and _serialization_spec.loader
+sys.modules[_serialization_spec.name] = serialization
+_serialization_spec.loader.exec_module(serialization)
 
 
 EXAMPLE_MANIFEST = rcp_2025_pb2.Manifest(
@@ -87,3 +99,19 @@ def test_length_mismatch_raises(tmp_path: Path) -> None:
     except ValueError:
         return
     assert False, "Expected length mismatch to raise"
+
+
+def test_load_simulation_enforces_monotonic_timestamps(tmp_path: Path) -> None:
+    payload = {
+        "metadata": {"sample_rate_hz": 50},
+        "accelerometer": {"t": [30, 10, 10], "x": [0, 1, 2], "y": [0, 1, 2], "z": [0, 1, 2]},
+        "gyroscope": {"t": [5, 2, 4], "x": [0, 0, 0], "y": [0, 0, 0], "z": [1, 1, 1]},
+    }
+    sim_path = tmp_path / "simulation.json"
+    sim_path.write_text(json.dumps(payload))
+
+    logger = logging.getLogger("test")
+    result = serialization.load_simulation(sim_path, logger)
+
+    assert list(result.accelerometer.t) == [10, 11, 30]
+    assert list(result.gyroscope.t) == [2, 4, 5]

@@ -58,10 +58,22 @@ def extract(
 def simulate(
     input_dir: Path = typer.Option(..., exists=True, file_okay=False, path_type=Path, help="Directory containing kinematics.json."),
     physics_engine: str = typer.Option("internal", help="Physics backend name."),
+    sample_rate_hz: float = typer.Option(200.0, help="Sampling rate for synthetic IMU channels."),
+    noise_std: float = typer.Option(0.01, help="Standard deviation for Gaussian sensor noise."),
+    gravity: str = typer.Option("0,0,-1", help="Gravity direction vector as comma-separated x,y,z."),
     out: Path = typer.Option(Path("./artifacts/simulation"), path_type=Path, help="Directory to store simulated data."),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logging."),
 ):
     """Generate IMU-like channels from extracted kinematics."""
+
+    def _parse_gravity(raw: str) -> tuple[float, float, float]:
+        parts = [p.strip() for p in raw.split(",") if p.strip()]
+        if len(parts) != 3:
+            raise typer.BadParameter("Gravity vector must have three comma-separated components")
+        try:
+            return float(parts[0]), float(parts[1]), float(parts[2])
+        except ValueError as exc:
+            raise typer.BadParameter("Gravity vector components must be numeric") from exc
 
     logger = configure_logger(verbose)
     kinematics_path = input_dir / "kinematics.json"
@@ -69,7 +81,17 @@ def simulate(
         raise FileNotFoundError(f"Missing kinematics.json in {input_dir}")
 
     kine = serialization.load_kinematics(kinematics_path, logger)
-    simulated = simulation.simulate_motion(kine, physics_engine=physics_engine, logger=logger)
+    sim_config = simulation.SimulationConfig(
+        sample_rate_hz=sample_rate_hz,
+        noise_std=noise_std,
+        gravity_direction=_parse_gravity(gravity),
+    )
+    simulated = simulation.simulate_motion(
+        kine,
+        physics_engine=physics_engine,
+        logger=logger,
+        config=sim_config,
+    )
     serialization.export_simulation(simulated, out, logger)
 
     console.print(f"Simulated data written to {out}")
