@@ -27,22 +27,35 @@ def configure_logger(verbose: bool) -> logging.Logger:
 
 
 @app.command()
-@click.option("--source", required=True, type=click.Path(exists=True, readable=True, path_type=Path), help="Source artwork to ingest.")
-@click.option("--device", default="generic", show_default=True, help="Device profile label.")
-@click.option("--style", default="neutral", show_default=True, help="Artistic intent for metadata tagging.")
-@click.option(
-    "--out",
-    default=Path("./artifacts/extraction"),
-    show_default=True,
-    type=click.Path(path_type=Path),
-    help="Directory to store intermediate outputs.",
-)
-@click.option("--verbose", "-v", is_flag=True, default=False, help="Enable debug logging.")
-def extract(source: Path, device: str, style: str, out: Path, verbose: bool) -> None:
+def extract(
+    source: Path = typer.Option(..., exists=True, readable=True, path_type=Path, help="Source artwork to ingest."),
+    device: str = typer.Option("generic", help="Device profile label."),
+    style: str = typer.Option("neutral", help="Artistic intent for metadata tagging."),
+    dpi: float | None = typer.Option(None, help="Dots per inch for the source capture."),
+    device_profile_path: Path | None = typer.Option(
+        None, path_type=Path, exists=True, dir_okay=False, readable=True, help="Path to device profile metadata."
+    ),
+    json_config: Path | None = typer.Option(
+        None, path_type=Path, exists=True, dir_okay=False, readable=True, help="JSON file with shape/noise parameters."
+    ),
+    gemini: bool = typer.Option(True, help="Enable Gemini labeling with GEMINI_API_KEY."),
+    gemini_model: str = typer.Option("gemini-1.5-flash", help="Gemini model used for labeling."),
+    out: Path = typer.Option(Path("./artifacts/extraction"), path_type=Path, help="Directory to store intermediate outputs."),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logging."),
+):
     """Run ingestion, extraction, and kinematics reconstruction."""
 
     logger = configure_logger(verbose)
-    ingest_config = ingestion.IngestionConfig(source=source, device=device, style=style)
+    ingest_config = ingestion.IngestionConfig(
+        source=source,
+        device=device,
+        style=style,
+        dpi=dpi,
+        device_profile_path=device_profile_path,
+        json_config=json_config,
+        enable_generative_labels=gemini,
+        gemini_model=gemini_model,
+    )
     ingested = ingestion.ingest(ingest_config, logger)
     extracted = extraction.extract_features(ingested, logger)
     kine = kinematics.reconstruct_power_law(extracted, logger)
