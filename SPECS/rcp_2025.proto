@@ -1,0 +1,67 @@
+syntax = "proto3";
+
+package cloud_readers.rcp;
+
+// Manifest describes the package level metadata stored alongside the columnar channels.
+message Manifest {
+  // Protocol version string, e.g. "rcp_2025".
+  string version = 1;
+
+  // Unique package identifier (UUID or other collision resistant id).
+  string package_id = 2;
+
+  // Human readable source descriptor (artist, file, project).
+  string source = 3;
+
+  // Device profile used when reconstructing trajectories.
+  string device_profile = 4;
+
+  // Physical dots-per-inch of the source scan or capture.
+  double dpi = 5;
+
+  // ISO8601 timestamp when the package was generated.
+  string created_at = 6;
+
+  // Additional metadata attached by the pipeline.
+  map<string, string> attributes = 7;
+}
+
+// Checksum captures integrity data for artifacts written to disk.
+message Checksum {
+  string path = 1;
+  string sha256 = 2;
+}
+
+// Index summarizes the package and embeds file checksums for validation.
+message Index {
+  uint64 touch_samples = 1;
+  uint64 acc_samples = 2;
+  uint64 gyro_samples = 3;
+  double duration_seconds = 4;
+  repeated Checksum checksums = 5;
+}
+
+// Touch samples are stored column-wise for efficient compression.
+message TouchChannel {
+  repeated uint64 t = 1; // microseconds
+  repeated float x = 2;
+  repeated float y = 3;
+  repeated float pressure = 4;
+  repeated float size = 5;
+}
+
+// Acceleration samples (m/s^2) in device coordinates.
+message AccChannel {
+  repeated uint64 t = 1; // microseconds
+  repeated float x = 2;
+  repeated float y = 3;
+  repeated float z = 4;
+}
+
+// Gyroscope samples (rad/s) in device coordinates.
+message GyroChannel {
+  repeated uint64 t = 1; // microseconds
+  repeated float x = 2;
+  repeated float y = 3;
+  repeated float z = 4;
+}

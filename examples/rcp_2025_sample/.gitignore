@@ -1,0 +1,5 @@
+# Ignore generated sample outputs to keep binary payloads out of the repo
+manifest.json
+index.json
+checksums.txt
+channels/
