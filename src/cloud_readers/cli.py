@@ -78,13 +78,32 @@ def extract(source: Path, device: str, style: str, out: Path, verbose: bool) -> 
 def simulate(input_dir: Path, physics_engine: str, out: Path, verbose: bool) -> None:
     """Generate IMU-like channels from extracted kinematics."""
 
+    def _parse_gravity(raw: str) -> tuple[float, float, float]:
+        parts = [p.strip() for p in raw.split(",") if p.strip()]
+        if len(parts) != 3:
+            raise typer.BadParameter("Gravity vector must have three comma-separated components")
+        try:
+            return float(parts[0]), float(parts[1]), float(parts[2])
+        except ValueError as exc:
+            raise typer.BadParameter("Gravity vector components must be numeric") from exc
+
     logger = configure_logger(verbose)
     kinematics_path = input_dir / "kinematics.json"
     if not kinematics_path.exists():
         raise FileNotFoundError(f"Missing kinematics.json in {input_dir}")
 
     kine = serialization.load_kinematics(kinematics_path, logger)
-    simulated = simulation.simulate_motion(kine, physics_engine=physics_engine, logger=logger)
+    sim_config = simulation.SimulationConfig(
+        sample_rate_hz=sample_rate_hz,
+        noise_std=noise_std,
+        gravity_direction=_parse_gravity(gravity),
+    )
+    simulated = simulation.simulate_motion(
+        kine,
+        physics_engine=physics_engine,
+        logger=logger,
+        config=sim_config,
+    )
     serialization.export_simulation(simulated, out, logger)
 
     console.print(f"Simulated data written to {out}")
